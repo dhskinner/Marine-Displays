@@ -1,0 +1,19 @@
+# PlatformIO
+.pio/
+.vscode/
+# Backup files
+*.bak
+*.old
+backups/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.workspace
+
+# Temporary files
+*.tmp
+*.log
+pre_restore_*.tar.gz

@@ -61,9 +61,14 @@ def main():
     app0 = next(off for sub, off in parts.values() if sub in ("ota_0", "factory"))
 
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    # "keep": use the flash mode/frequency/size PlatformIO already wrote into
+    # bootloader.bin and firmware.bin from the project's settings, rather than
+    # one value for every display. (For QIO flash PlatformIO writes DIO in the
+    # headers, as the ESP32-S3 ROM loads the bootloader in DIO; QIO comes from
+    # the bootloader it builds, e.g. bootloader_qio_80m for the 7" display.)
     cmd = find_esptool() + [
         "--chip", "esp32s3", "merge_bin", "-o", out,
-        "--flash_mode", "dio", "--flash_freq", "80m", "--flash_size", "16MB",
+        "--flash_mode", "keep", "--flash_freq", "keep", "--flash_size", "keep",
         hex(BOOTLOADER_OFFSET), os.path.join(build, "bootloader.bin"),
         hex(PARTITIONS_OFFSET), os.path.join(build, "partitions.bin"),
         hex(otadata), find_boot_app0(),

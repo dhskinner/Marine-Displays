@@ -87,6 +87,8 @@ void reset_vsync_stats();
 void LCD_Init();
 // Draws an area given in UI (480x480) coordinates; offsets it onto the panel.
 void LCD_addWindow(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yend, uint8_t* color);
+// Fills the panel areas left and right of the UI with one RGB565 colour.
+void LCD_FillSideBars(uint16_t color565);
 
 // Backlight: this board only switches it on/off (CH422G EXIO2); no PWM.
 // Any Light > 0 is "on".

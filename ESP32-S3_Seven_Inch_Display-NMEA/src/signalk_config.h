@@ -65,7 +65,8 @@ float get_sensor_value_by_path(const String& path);
 bool get_sensor_text_by_path(const String& path, String& text, String& desc);
 // Wind angle as "45° P" / "45° S" for the value screens; false if not a wind angle.
 bool wind_angle_text(const String& path, String& text);
-void  set_sensor_value_by_path(const String& path, float value);
+void  set_sensor_value_by_path(const String& path, float value);   // core 1 only: scans the gauge path Strings
+void  set_extended_sensor_value(const String& path, float value);  // any core: extended map only
 // Milliseconds since the path last arrived (UINT32_MAX = never), and the value
 // only if it arrived within max_age_ms (else NAN).
 uint32_t get_sensor_age_ms_by_path(const String& path);

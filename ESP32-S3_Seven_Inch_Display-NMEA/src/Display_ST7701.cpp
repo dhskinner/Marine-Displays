@@ -57,6 +57,29 @@ static void LCD_FillPanel(uint16_t color565)
   heap_caps_free(buf);
 }
 
+// Fill the bars either side of the 480x480 UI (the panel is wider than the UI).
+// LVGL never draws there, so they keep whatever was last put here.
+void LCD_FillSideBars(uint16_t color565)
+{
+  if (!panel_handle || UI_X_OFFSET <= 0) return;
+  const int w = UI_X_OFFSET;                       // 160 px each side
+  const int rows = 16;
+  size_t px = (size_t)w * rows;
+  uint16_t *buf = (uint16_t *)heap_caps_malloc(px * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+  if (!buf) buf = (uint16_t *)heap_caps_malloc(px * sizeof(uint16_t), MALLOC_CAP_INTERNAL);
+  if (!buf) {
+    Serial.println("[DISPLAY] LCD_FillSideBars: no memory for fill buffer");
+    return;
+  }
+  for (size_t i = 0; i < px; ++i) buf[i] = color565;
+  for (int y = 0; y < PANEL_V_RES; y += rows) {
+    int y_end = y + rows > PANEL_V_RES ? PANEL_V_RES : y + rows;
+    esp_lcd_panel_draw_bitmap(panel_handle, 0, y, w, y_end, buf);
+    esp_lcd_panel_draw_bitmap(panel_handle, PANEL_H_RES - w, y, PANEL_H_RES, y_end, buf);
+  }
+  heap_caps_free(buf);
+}
+
 static void LCD_CreatePanel()
 {
   esp_lcd_rgb_panel_config_t cfg = {};

@@ -570,8 +570,8 @@ static int ais_find_or_alloc(uint32_t mmsi) {
 void ais_n2k_update_position(uint32_t mmsi, double lat, double lon,
                              double cog_deg, double sog_kn) {
     // Filter own vessel by MMSI
-    extern String saved_own_mmsi;
-    if (saved_own_mmsi.length() > 0 && (uint32_t)saved_own_mmsi.toInt() == mmsi) return;
+    extern volatile uint32_t g_own_mmsi;   // not saved_own_mmsi: see network_setup.cpp
+    if (g_own_mmsi != 0 && g_own_mmsi == mmsi) return;
 
     if (!g_ais_mutex) g_ais_mutex = xSemaphoreCreateMutex();
     if (!xSemaphoreTake(g_ais_mutex, pdMS_TO_TICKS(50))) return;
@@ -588,8 +588,8 @@ void ais_n2k_update_position(uint32_t mmsi, double lat, double lon,
 void ais_n2k_update_name(uint32_t mmsi, const char* name) {
     if (!name || !name[0]) return;
     // Filter own vessel by MMSI
-    extern String saved_own_mmsi;
-    if (saved_own_mmsi.length() > 0 && (uint32_t)saved_own_mmsi.toInt() == mmsi) return;
+    extern volatile uint32_t g_own_mmsi;   // not saved_own_mmsi: see network_setup.cpp
+    if (g_own_mmsi != 0 && g_own_mmsi == mmsi) return;
 
     if (!g_ais_mutex) g_ais_mutex = xSemaphoreCreateMutex();
     if (!xSemaphoreTake(g_ais_mutex, pdMS_TO_TICKS(50))) return;

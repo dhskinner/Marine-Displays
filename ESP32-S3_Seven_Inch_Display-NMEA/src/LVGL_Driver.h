@@ -23,6 +23,7 @@ void example_increase_lvgl_tick(void *arg);
 uint32_t get_flush_max_us();
 uint32_t get_flush_count();
 void reset_flush_stats();
+void Lvgl_FlushAreaInfo(char* out, size_t n);   // diagnostics: what's being redrawn
 
 void Lvgl_Init(void);
 void Lvgl_Loop(void);

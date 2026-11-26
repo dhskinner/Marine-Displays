@@ -61,6 +61,7 @@ void n2k_gw_load(N2kGwSettings& s) {
     Preferences p;
     s = N2kGwSettings();
     if (p.begin(PREFS_NS, true)) {
+        s.demo     = p.getBool("demo", false);
         s.use_wifi = p.getBool("use_wifi", false);
         s.format   = p.getUChar("fmt", N2KGW_FMT_YDRAW);
         s.udp      = p.getBool("udp", false);
@@ -77,6 +78,7 @@ void n2k_gw_save(const N2kGwSettings& s) {
         Serial.println("[N2K-WiFi] ERROR: could not open settings");
         return;
     }
+    p.putBool("demo", s.demo);
     p.putBool("use_wifi", s.use_wifi);
     p.putUChar("fmt", s.format);
     p.putBool("udp", s.udp);
@@ -95,7 +97,11 @@ const N2kGwSettings& n2k_gw_settings() {
 
 bool n2k_gw_enabled() {
     const N2kGwSettings& s = n2k_gw_settings();
-    return s.use_wifi && s.port != 0 && (s.udp || s.host.length() > 0);
+    return !s.demo && s.use_wifi && s.port != 0 && (s.udp || s.host.length() > 0);
+}
+
+bool n2k_demo_selected() {
+    return n2k_gw_settings().demo;
 }
 
 // ── Receive task (core 0, like the CAN task) ────────────────────────────

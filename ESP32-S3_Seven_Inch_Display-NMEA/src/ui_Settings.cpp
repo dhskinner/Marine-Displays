@@ -345,6 +345,23 @@ static void apply_overlay_style(lv_obj_t *overlay, uint8_t level) {
     }
 }
 
+// What a pixel of colour `base` looks like under the current brightness
+// overlay. Used for the panel areas outside the 480x480 UI, which the
+// overlays don't cover, so they dim and tint the same as the screen.
+lv_color_t brightness_overlay_blend(lv_color_t base) {
+    if (is_board_v4()) {
+        if (brightness_level >= 110) return base;                      // PWM only, no overlay
+        uint8_t opa = (uint8_t)(230 - ((brightness_level - 10) * 200 / 99));
+        return lv_color_mix(lv_color_make(40, 0, 0), base, opa);
+    }
+    switch (brightness_level) {
+        case 1:  return lv_color_mix(lv_color_make(0, 0, 0),  base, LV_OPA_40);
+        case 2:  return lv_color_mix(lv_color_make(40, 0, 0), base, LV_OPA_60);
+        case 3:  return lv_color_mix(lv_color_make(30, 0, 0), base, LV_OPA_80);
+        default: return base;
+    }
+}
+
 extern "C" void night_mode_init_overlays(void) {
     lv_obj_t *screens[6] = {ui_Screen1, ui_Screen2, ui_Screen3,
                              ui_Screen4, ui_Screen5, ui_Settings};

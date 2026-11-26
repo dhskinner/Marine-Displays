@@ -17,6 +17,7 @@ bool test_mode = false;
 #include "ui_Settings.h"
 #include "signalk_config.h"
 #include "nmea2000_config.h"
+#include "nmea0183.h"
 #include "screen_config_c_api.h"
 #include "network_setup.h"
 #include "gauge_config.h"
@@ -1072,6 +1073,62 @@ void test_move_gauge(int screen, int gauge, int angle) {
     }
 }
 
+// ── Side bars ────────────────────────────────────────────────────────────
+// The panel is 800 px wide and the UI 480, so there's a bar either side that
+// LVGL never draws. Paint the bars the same colour as the screen's background
+// when it's a plain colour, tinted like the screen by the brightness overlay.
+static lv_color_t parse_hex_rgb(const char* s, lv_color_t def) {
+    if (!s || s[0] != '#') return def;
+    char* end = nullptr;
+    long v = strtol(s + 1, &end, 16);
+    if (end != s + 7) return def;                         // needs exactly "#RRGGBB"
+    return lv_color_make((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+}
+
+// Background colour of screen s (0-based) as its display draws it; black when
+// the background is an image or the display type uses a fixed background.
+static lv_color_t screen_bar_color(int s) {
+    const ScreenConfig& c = screen_configs[s];
+    const lv_color_t black = lv_color_black();
+    bool custom = strcmp(c.background_path, "Custom Color") == 0;
+    switch (c.display_type) {
+        case DISPLAY_TYPE_NUMBER:
+        case DISPLAY_TYPE_DUAL:
+        case DISPLAY_TYPE_QUAD:
+        case DISPLAY_TYPE_GRAPH:
+        case DISPLAY_TYPE_POSITION:
+            return custom ? parse_hex_rgb(c.number_bg_color, black) : black;
+        case DISPLAY_TYPE_COMPASS:
+        case DISPLAY_TYPE_WIND:                           // always use their colour setting
+            return parse_hex_rgb(c.number_bg_color, black);
+        case DISPLAY_TYPE_AIS:                            // same default as ais_display.cpp
+            return parse_hex_rgb(c.number_bg_color[0] ? c.number_bg_color : "#001020", black);
+        default:                                          // gauges, attitude, anchor
+            return black;
+    }
+}
+
+// Called from loop(). Repaints only when the colour changes (screen swipe,
+// settings saved, brightness changed, Settings opened).
+static void update_side_bars() {
+    static uint32_t last_check = 0;
+    static uint16_t painted = 0x0000;                     // LCD_Init() leaves them black
+    uint32_t now = millis();
+    if (now - last_check < 150) return;
+    last_check = now;
+
+    lv_color_t col = lv_color_black();
+    if (lv_scr_act() != ui_Settings) {
+        int s = ui_get_current_screen() - 1;
+        if (s >= 0 && s < NUM_SCREENS) col = screen_bar_color(s);
+    }
+    col = brightness_overlay_blend(col);
+    if (col.full != painted) {
+        LCD_FillSideBars(col.full);
+        painted = col.full;
+    }
+}
+
 // ets_printf writes directly to hardware UART0 (visible on CH343 monitor)
 // even when Serial uses USB-OTG CDC (ARDUINO_USB_CDC_ON_BOOT=1).
 extern "C" int ets_printf(const char *fmt, ...);
@@ -1281,7 +1338,10 @@ void setup() {
     Serial.println("Starting NMEA 2000...");
     Serial.flush();
     enable_nmea2000();
-    
+
+    // NMEA 0183 on the RS485 terminal (if switched on in Data Setup)
+    nmea0183_begin();
+
     Serial.println("Display initialized with WiFi optimizations.");
     Serial.print("WiFi SSID: ");
     Serial.println(WiFi.SSID());
@@ -1304,6 +1364,23 @@ void loop() {
                       heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                       heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
     }
+
+#ifdef ENABLE_RGB_DIAG
+    // Panel timing every 5 s. A frame is ~34 ms at 12 MHz; a gap well over
+    // that means the panel's DMA ran short of PSRAM bandwidth (seen as flicker).
+    static unsigned long last_rgb_log = 0;
+    if (millis() - last_rgb_log >= 5000) {
+        last_rgb_log = millis();
+        char areas[96];
+        Lvgl_FlushAreaInfo(areas, sizeof(areas));
+        Serial.printf("[RGB] frames=%u max_gap=%u us | lvgl flushes=%u max_flush=%u us %s | screen=%d\n",
+                      (unsigned)get_vsync_count(), (unsigned)get_vsync_max_gap_us(),
+                      (unsigned)get_flush_count(), (unsigned)get_flush_max_us(),
+                      areas, ui_get_current_screen());
+        reset_vsync_stats();
+        reset_flush_stats();
+    }
+#endif
 
     // --- Screen-off timeout ---------------------------------------------------
     // g_last_activity_ms is updated on every touch in Lvgl_Touchpad_Read().
@@ -1735,6 +1812,8 @@ void loop() {
         g_pending_rotation_apply = false;
         Lvgl_SetRotate180(display_rotate_180);
     }
+
+    update_side_bars();
 
     Lvgl_Loop();
     if (g_full_brightness_request) {

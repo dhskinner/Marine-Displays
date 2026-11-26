@@ -144,6 +144,34 @@ void* buf1 = NULL;
 void* buf2 = NULL;
 static volatile uint32_t g_flush_max_us = 0;
 static volatile uint32_t g_flush_count = 0;
+static lv_area_t g_flush_last = {0, 0, -1, -1};
+static lv_area_t g_flush_union = {0, 0, -1, -1};
+
+// "last (x1,y1)-(x2,y2) all (x1,y1)-(x2,y2)": the last area flushed and the
+// bounding box of every area since reset_flush_stats(). For finding what
+// keeps redrawing.
+// ── Skip label updates that don't change the text ───────────────────────
+// Linked with -Wl,--wrap=lv_label_set_text (platformio.ini), so every call in
+// the firmware comes through here. LVGL redraws a label on every set_text,
+// even with identical text, and the display updates set their labels ~10
+// times a second whether or not the value moved. Each redraw is copied into
+// the PSRAM frame buffer while the panel is reading it, and that constant
+// traffic showed as background flicker on solid-colour screens. Passing the
+// label's own buffer (LVGL's "refresh" idiom) still goes through.
+extern "C" void __real_lv_label_set_text(lv_obj_t* obj, const char* text);
+extern "C" void __wrap_lv_label_set_text(lv_obj_t* obj, const char* text) {
+  if (obj && text) {
+    const char* cur = lv_label_get_text(obj);
+    if (cur && cur != text && strcmp(cur, text) == 0) return;
+  }
+  __real_lv_label_set_text(obj, text);
+}
+
+void Lvgl_FlushAreaInfo(char* out, size_t n) {
+  snprintf(out, n, "last (%d,%d)-(%d,%d) all (%d,%d)-(%d,%d)",
+           g_flush_last.x1, g_flush_last.y1, g_flush_last.x2, g_flush_last.y2,
+           g_flush_union.x1, g_flush_union.y1, g_flush_union.x2, g_flush_union.y2);
+}
 
 // Pixel remapping support for diagnosing wiring/endian/color issues
 // g_remap_table[src_bit] -> target_bit
@@ -213,6 +241,11 @@ void Lvgl_Display_LCD( lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_
     uint32_t count = w * h;
     lvgl_remap_pixels_inplace(color_p, (int)count);
   }
+
+  // Diagnostics: where on screen LVGL is redrawing (see Lvgl_FlushAreaInfo)
+  g_flush_last = *area;
+  if (g_flush_count == 0) g_flush_union = *area;
+  else _lv_area_join(&g_flush_union, &g_flush_union, area);
 
   // Try passthrough with correct GPIO pinout
   LCD_addWindow(area->x1, area->y1, area->x2, area->y2, ( uint8_t *)color_p);

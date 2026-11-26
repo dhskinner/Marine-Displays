@@ -21,6 +21,11 @@ void disable_nmea2000();
 // Returns true while the N2K task is running.
 bool is_nmea2000_running();
 
+// Re-read which N2K field each gauge slot shows. Call on core 1 (loop / web
+// handlers) after the gauge paths change; the receive tasks only read the
+// result, never the path Strings themselves.
+void n2k_refresh_slot_fields();
+
 // Total PGN messages received since enable_nmea2000().
 uint32_t get_n2k_msg_count();
 

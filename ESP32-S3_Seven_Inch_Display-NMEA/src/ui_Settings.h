@@ -37,6 +37,10 @@ void brightness_set_full(void);
 
 #ifdef __cplusplus
 }
+
+// `base` as it looks under the current brightness overlay (for panel areas
+// the overlays don't cover).
+lv_color_t brightness_overlay_blend(lv_color_t base);
 #endif
 
 #endif

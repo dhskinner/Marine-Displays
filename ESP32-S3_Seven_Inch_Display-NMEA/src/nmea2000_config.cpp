@@ -13,6 +13,7 @@
 #include "ais_display.h"            // ais_n2k_update_position/name
 #include "NMEA2000_esp32_twai.h"  // Our local TWAI driver for ESP32-S3
 #include "n2k_gateway.h"          // Optional: same data from a WiFi gateway
+#include "nmea_demo.h"            // Optional: synthetic Demonstration data
 #include <N2kMessages.h>
 #include <N2kMessagesEnumToStr.h>
 #include <freertos/FreeRTOS.h>
@@ -398,24 +399,42 @@ N2kField n2k_field_from_stored(const String& stored) {
 // ── Route a decoded value to every gauge/number slot that wants this field ──
 volatile int g_n2k_heading_true = 0;
 
-static void route_value(N2kField field, float value) {
-    // Check the 10 gauge parameter slots
+// Which N2K field each gauge slot shows. route_value() runs on core 0 (CAN,
+// WiFi gateway and demo tasks) and must not read the gauge path Strings: the
+// web server rewrites them on core 1 when Gauge Calibration is saved, and a
+// String read mid-rewrite reads freed memory. So core 1 turns the paths into
+// these plain numbers whenever they change, and core 0 only reads numbers.
+static volatile uint16_t slot_field[TOTAL_PARAMS];
+
+void n2k_refresh_slot_fields() {
     for (int i = 0; i < TOTAL_PARAMS; i++) {
-        String path = get_signalk_path_by_index(i);
-        if (n2k_field_from_stored(path) == field) {
+        slot_field[i] = (uint16_t)n2k_field_from_stored(get_signalk_path_by_index(i));
+    }
+}
+
+// Unit and label are fixed per field, so they're stored once, not on every
+// value (that was three String allocations per value, in internal RAM).
+static bool field_meta_set[N2K_FIELD_COUNT];
+
+static void route_value(N2kField field, float value) {
+    // Gauge parameter slots showing this field
+    for (int i = 0; i < TOTAL_PARAMS; i++) {
+        if (slot_field[i] == (uint16_t)field) {
             set_sensor_value(i, value);
         }
     }
     // Store in the extended map keyed by the numeric enum string so
     // screen_configs lookups (which store the enum as a string) find it.
+    // (Not set_sensor_value_by_path: that scans gauge path Strings, see above.)
     String key = String((int)field);
-    set_sensor_value_by_path(key, value);
-    // Set SI unit + description once so convert_unit works on displays
-    const char* unit = n2k_field_unit(field);
-    if (unit[0]) {
-        set_sensor_unit_by_path(key, String(unit));
-    }
-    {
+    set_extended_sensor_value(key, value);
+    // SI unit + description so convert_unit works on displays
+    if (field < N2K_FIELD_COUNT && !field_meta_set[field]) {
+        field_meta_set[field] = true;
+        const char* unit = n2k_field_unit(field);
+        if (unit[0]) {
+            set_sensor_unit_by_path(key, String(unit));
+        }
         String lbl = String(n2k_field_label(field));
         int bracket = lbl.lastIndexOf(" [");
         if (bracket > 0) lbl = lbl.substring(0, bracket);
@@ -1015,6 +1034,15 @@ void enable_nmea2000() {
     if (n2k_running) return;
 
     init_sensor_mutex();
+    n2k_refresh_slot_fields();   // before any task can call route_value()
+
+    // Demonstration selected: don't open the CAN port; generate synthetic
+    // messages and feed them to the same handler.
+    if (n2k_demo_selected()) {
+        n2k_running = true;
+        nmea_demo_start_n2k(handle_n2k_msg);
+        return;
+    }
 
     // WiFi gateway selected: don't open the CAN port, feed the same handler
     // from the network instead.
@@ -1058,6 +1086,7 @@ void disable_nmea2000() {
     if (!n2k_running) return;
     n2k_running = false;
     n2k_gw_stop();
+    nmea_demo_stop_n2k();
     if (n2k_task_handle) {
         vTaskDelay(pdMS_TO_TICKS(100));  // let task exit cleanly
         n2k_task_handle = nullptr;

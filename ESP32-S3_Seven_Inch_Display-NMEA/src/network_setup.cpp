@@ -3,6 +3,8 @@
 #include "gauge_config.h"
 #include "version.h"
 #include "n2k_gateway.h"
+#include "nmea0183.h"
+#include "nmea_demo.h"
 #include "ota_guard.h"
 #include "ota_check.h"
 #include <Arduino.h>
@@ -242,6 +244,9 @@ static const uint16_t WIFI_WAIT_DEFAULT = 15, WIFI_WAIT_MIN = 15, WIFI_WAIT_MAX 
 uint16_t wifi_wait_sec = WIFI_WAIT_DEFAULT;
 // Own ship MMSI for AIS self-filtering (0 = disabled)
 String saved_own_mmsi = "";
+// saved_own_mmsi as a number, for the AIS handlers on core 0: they mustn't
+// read the String, which saving Device Settings rewrites on core 1.
+volatile uint32_t g_own_mmsi = 0;
 // 10 SignalK paths: [screen][gauge] => idx = s*2+g
 String signalk_paths[NUM_SCREENS * 2];
 
@@ -733,6 +738,7 @@ void load_preferences() {
         wifi_wait_sec = preferences.getUShort("wifi_wait", WIFI_WAIT_DEFAULT);
         if (wifi_wait_sec < WIFI_WAIT_MIN || wifi_wait_sec > WIFI_WAIT_MAX) wifi_wait_sec = WIFI_WAIT_DEFAULT;
         saved_own_mmsi = preferences.getString("own_mmsi", "");
+        g_own_mmsi = (uint32_t)saved_own_mmsi.toInt();
         // Load auto-scroll interval (seconds)
         auto_scroll_sec = preferences.getUShort("auto_scroll", 0);
         unit_system = (UnitSystem)preferences.getUShort("unit_system", (uint16_t)UNIT_NAUTICAL_METRIC);
@@ -1888,6 +1894,7 @@ void handle_save_gauges() {
                 String skpathKey = "skpath_" + String(s) + "_" + String(g);
                 if (config_server.hasArg(skpathKey)) {
                     signalk_paths[idx] = config_server.arg(skpathKey);
+                    n2k_refresh_slot_fields();   // receive tasks read this, not the Strings
                 }
                 // Save icon selection
                 String iconKey = "icon_" + String(s) + "_" + String(g);
@@ -2524,6 +2531,7 @@ void handle_root() {
     html += "</div></div>";
 
     html += "<div class='root-actions' style='margin-top:12px;'>";
+    html += "<button class='tab-btn' onclick=\"location.href='/data'\">Data Setup</button>";
     html += "<button class='tab-btn' onclick=\"location.href='/network'\">Network Setup</button>";
     html += "<button class='tab-btn' onclick=\"location.href='/gauges'\">Gauge Calibration</button>";
     html += "<button class='tab-btn' onclick=\"location.href='/needles'\">Needles</button>";
@@ -2663,33 +2671,6 @@ void handle_network_page() {
 
     html += "<div class='form-row'><label></label><small style='color:#666'>How long to look for your WiFi at start-up before switching to the setup hotspot. Default 15. Increase it (e.g. 90) if your router takes longer to start than the display. While it's looking, the screen doesn't update or respond to touch, so a longer wait means a longer frozen screen when the WiFi isn't there (or the password is wrong).</small></div>";
 
-    // NMEA 2000 data source: CAN port or WiFi gateway. Same form as the WiFi
-    // settings above, so one Save & Reboot saves everything on this page.
-    {
-        const N2kGwSettings& gw = n2k_gw_settings();
-        auto sel = [](bool on) { return on ? String(" selected") : String(""); };
-        html += "<h3 style='margin-top:22px;'>NMEA 2000 data source</h3>";
-        html += "<div class='form-row'><label>Status:</label><span id='n2kstat' style='color:#888'>checking...</span></div>";
-        html += "<div class='form-row'><label>Source:</label><select name='src' id='n2ksrc' onchange='n2kSrcChanged()'>"
-                "<option value='can'" + sel(!gw.use_wifi) + ">CAN port (wired to the NMEA 2000 bus)</option>"
-                "<option value='wifi'" + sel(gw.use_wifi) + ">WiFi gateway</option></select></div>";
-        html += "<div id='n2kgw' style='display:" + String(gw.use_wifi ? "block" : "none") + "'>";
-        html += "<div class='form-row'><label>Gateway format:</label><select name='fmt'>";
-        for (uint8_t f = N2KGW_FMT_YDRAW; f <= N2KGW_FMT_SEASMART; f++) {
-            html += "<option value='" + String(f) + "'" + sel(gw.format == f) + ">" + n2k_gw_format_name(f) + "</option>";
-        }
-        html += "</select></div>";
-        html += "<div class='form-row'><label>Connection:</label><select name='proto' id='n2kproto' onchange='n2kSrcChanged()'>"
-                "<option value='tcp'" + sel(!gw.udp) + ">TCP (display connects to the gateway)</option>"
-                "<option value='udp'" + sel(gw.udp) + ">UDP (gateway sends to the display)</option></select></div>";
-        html += "<div class='form-row' id='n2khostrow'><label>Gateway IP address:</label><input name='host' type='text' value='" + html_attr_escape(gw.host) + "' placeholder='e.g. 192.168.4.1'></div>";
-        html += "<div class='form-row'><label>Port:</label><input name='port' type='number' min='1' max='65535' value='" + (gw.port ? String(gw.port) : String("")) + "'></div>";
-        html += "<p style='color:#888;font-size:0.85em;margin:4px 0 0'>Use the data format, port and protocol set up on your gateway's own settings page. "
-                "The display only receives data and never sends anything to the gateway or the NMEA 2000 bus. "
-                "The display must be on the same WiFi network as the gateway: either your boat's router, or the gateway's own WiFi hotspot "
-                "if it has one. Set the WiFi at the top of this page to that network.</p>";
-        html += "</div>";
-    }
     html += "<div style='text-align:center;margin-top:16px;'><button class='tab-btn' type='submit' style='padding:10px 18px;'>Save & Reboot</button></div>";
     html += "</form>";
 
@@ -2735,30 +2716,6 @@ void handle_network_page() {
               "fetch('/scan-wifi').then(function(){pollResults(8);}).catch(function(e){div.innerHTML='Scan error: '+e;btn.disabled=false;btn.textContent='Scan';});"
             "}"
             "function pickSsid(s){document.getElementById('ssid').value=s;}"
-            // Poll /n2k-stats every 2 s and update the NMEA 2000 status span
-            "function pollN2k(){"
-              "fetch('/n2k-stats').then(function(r){return r.json();}).then(function(d){"
-                "var el=document.getElementById('n2kstat');"
-                "var via=d.src==='wifi'?' via WiFi gateway':'';"
-                "if(d.pgns>0){"
-                  "el.style.color='#4a4';el.style.fontWeight='bold';"
-                  "el.textContent='Active' + via + ' (' + d.pgns + ' PGNs received)';"
-                "}else{"
-                  "el.style.color='#c80';el.style.fontWeight='normal';"
-                  "el.textContent=d.src==='wifi'?'No data yet':'No data (bus connected?)';"
-                "}"
-                "if(d.src==='wifi'){"
-                  "el.textContent+=' - ' + d.gw + (d.bad>0?' (' + d.bad + ' unreadable lines: check the format)':'');"
-                "}"
-              "}).catch(function(){});"
-              "setTimeout(pollN2k,2000);"
-            "}"
-            "pollN2k();"
-            "function n2kSrcChanged(){"
-              "document.getElementById('n2kgw').style.display=document.getElementById('n2ksrc').value==='wifi'?'block':'none';"
-              "document.getElementById('n2khostrow').style.display=document.getElementById('n2kproto').value==='tcp'?'':'none';"
-            "}"
-            "n2kSrcChanged();"
             "</script>";
 
     html += "</div></div></body></html>";
@@ -2769,7 +2726,9 @@ void handle_network_page() {
 // Reads the NMEA 2000 data source fields posted with the Network form.
 // Returns false (with a message) if the WiFi gateway settings are incomplete.
 static bool read_n2k_source_args(N2kGwSettings& gw, String& problem) {
-    gw.use_wifi = config_server.arg("src") == "wifi";
+    String src = config_server.arg("src");
+    gw.demo = src == "demo";
+    gw.use_wifi = src == "wifi";
     gw.format = (uint8_t)constrain(config_server.arg("fmt").toInt(), N2KGW_FMT_YDRAW, N2KGW_FMT_SEASMART);
     gw.udp = config_server.arg("proto") == "udp";
     gw.host = config_server.arg("host");
@@ -2782,24 +2741,237 @@ static bool read_n2k_source_args(N2kGwSettings& gw, String& problem) {
     return problem.length() == 0;
 }
 
+// ── Data Setup page: NMEA 2000 and NMEA 0183 sources ───────────────────────
+void handle_data_page() {
+    auto sel = [](bool on) { return on ? String(" selected") : String(""); };
+    String html = "<html><head>";
+    html += STYLE;
+    html += "<title>Data Setup</title>"
+            "<style>"
+            "#traffic{background:#0d1117;color:#c9d1d9;font:12px/1.35 Consolas,Menlo,monospace;height:220px;overflow-y:auto;"
+              "margin:6px 0 0;padding:6px 8px;border-radius:6px;white-space:pre;}"
+            "#traffic .b{color:#ff7b72}#traffic .j{color:#8b949e}#traffic .i{color:#79c0ff}"
+            ".traffic-bar{display:flex;justify-content:space-between;align-items:center;font-size:0.85em;color:#666;margin-top:10px}"
+            ".traffic-bar button{padding:3px 10px;cursor:pointer;margin-left:4px}"
+            "</style></head><body><div class='container'>";
+    html += "<div class='tab-content'>";
+    html += "<h2>Data Setup</h2>";
+
+    // ── NMEA 2000: CAN port or WiFi gateway. Chosen at start-up, so saving reboots.
+    {
+        const N2kGwSettings& gw = n2k_gw_settings();
+        html += "<h3 style='margin-top:12px;'>NMEA 2000</h3>";
+        html += "<form method='POST' action='/save-n2k'>";
+        html += "<div class='form-row'><label>Status:</label><span id='n2kstat' style='color:#888'>checking...</span></div>";
+        html += "<div class='form-row'><label>Source:</label><select name='src' id='n2ksrc' onchange='n2kSrcChanged()'>"
+                "<option value='can'" + sel(!gw.use_wifi && !gw.demo) + ">CAN port (wired to the NMEA 2000 bus)</option>"
+                "<option value='wifi'" + sel(gw.use_wifi && !gw.demo) + ">WiFi gateway</option>"
+                "<option value='demo'" + sel(gw.demo) + ">Demonstration (synthetic data)</option></select></div>";
+        html += "<div id='n2kdemo' style='display:" + String(gw.demo ? "block" : "none") + "'>"
+                "<p style='color:#888;font-size:0.85em;margin:4px 0 0'>Synthetic data from a twin-engine motor boat cruising in slow loops, "
+                "with realistic values for every NMEA 2000 PGN the display reads: engines, tanks, batteries, navigation, wind, "
+                "depth, temperatures and a few AIS targets.</p></div>";
+        html += "<div id='n2kgw' style='display:" + String(gw.use_wifi && !gw.demo ? "block" : "none") + "'>";
+        html += "<div class='form-row'><label>Gateway format:</label><select name='fmt'>";
+        for (uint8_t f = N2KGW_FMT_YDRAW; f <= N2KGW_FMT_SEASMART; f++) {
+            html += "<option value='" + String(f) + "'" + sel(gw.format == f) + ">" + n2k_gw_format_name(f) + "</option>";
+        }
+        html += "</select></div>";
+        html += "<div class='form-row'><label>Connection:</label><select name='proto' id='n2kproto' onchange='n2kSrcChanged()'>"
+                "<option value='tcp'" + sel(!gw.udp) + ">TCP (display connects to the gateway)</option>"
+                "<option value='udp'" + sel(gw.udp) + ">UDP (gateway sends to the display)</option></select></div>";
+        html += "<div class='form-row' id='n2khostrow'><label>Gateway IP address:</label><input name='host' type='text' value='" + html_attr_escape(gw.host) + "' placeholder='e.g. 192.168.4.1'></div>";
+        html += "<div class='form-row'><label>Port:</label><input name='port' type='number' min='1' max='65535' value='" + (gw.port ? String(gw.port) : String("")) + "'></div>";
+        html += "<p style='color:#888;font-size:0.85em;margin:4px 0 0'>Use the data format, port and protocol set up on your gateway's own settings page. "
+                "The display only receives data and never sends anything to the gateway or the NMEA 2000 bus. "
+                "The display must be on the same WiFi network as the gateway: either your boat's router, or the gateway's own WiFi hotspot "
+                "if it has one. Set the WiFi on the <a href='/network'>Network Setup</a> page.</p>";
+        html += "</div>";
+        html += "<div style='text-align:center;margin-top:12px;'><button class='tab-btn' type='submit' style='padding:10px 18px;'>Save &amp; Reboot</button></div>";
+        html += "</form>";
+    }
+
+    // ── NMEA 0183: serial port. Applied straight away, no reboot.
+    {
+        const Nmea0183Settings& ns = nmea0183_settings();
+        static const uint32_t bauds[] = {4800, 9600, 19200, 38400, 57600, 115200};
+        html += "<h3 style='margin-top:26px;border-top:1px solid #e6e9f2;padding-top:16px;'>NMEA 0183</h3>";
+        html += "<form id='f0183' onsubmit='return save0183()'>";
+        html += "<div class='form-row'><label>Status:</label><span id='st0183' style='color:#888'>checking...</span></div>";
+        html += "<div class='form-row'><label>Serial port:</label><select name='port' id='port0183' onchange='port0183Changed()'>"
+                "<option value='0'" + sel(ns.port == NMEA0183_PORT_OFF) + ">Off</option>"
+                "<option value='1'" + sel(ns.port == NMEA0183_PORT_RS485) + ">RS485 terminal (A/B)</option>"
+                "<option value='2'" + sel(ns.port == NMEA0183_PORT_DEMO) + ">Demonstration (synthetic data)</option></select></div>";
+        html += "<div id='demo0183' style='display:none'><p style='color:#888;font-size:0.85em;margin:4px 0 0'>"
+                "Synthetic GPS, heading, depth, wind, speed and water temperature sentences for demonstration and testing</p></div>";
+        html += "<div id='hw0183'>";
+        html += "<div class='form-row'><label>Baud rate:</label><select name='baud'>";
+        for (uint32_t b : bauds) {
+            String label = String(b);
+            if (b == 4800)  label += " (standard)";
+            if (b == 38400) label += " (high speed, AIS)";
+            html += "<option value='" + String(b) + "'" + sel(ns.baud == b) + ">" + label + "</option>";
+        }
+        html += "</select></div>";
+        html += "<div class='form-row'><label>Reconnect automatically:</label><input name='reconnect' type='checkbox' value='1'"
+                + String(ns.auto_reconnect ? " checked" : "") + "></div>";
+        html += "<div class='form-row'><label></label><small style='color:#666'>If no data arrives for 10 s (the instrument restarted or a cable "
+                "came loose), the display reopens the port, then tries again after 5, 10, 20 and 40 s, and every 60 s after that until data comes back.</small></div>";
+        html += "<p style='color:#888;font-size:0.85em;margin:4px 0 0'>Wire the instrument's NMEA 0183 output to the RS485 terminal: "
+                "its &ldquo;+&rdquo; (or A, TX+) to A and its &ldquo;&minus;&rdquo; (or B, TX&minus;) to B. "
+                "If the traffic below shows garbled characters, check the baud rate or swap the A and B wires. "
+                "The display only listens; it never sends on this port.</p>";
+        html += "</div>";   // hw0183
+        html += "<div style='text-align:center;margin-top:12px;'><button class='tab-btn' id='btn0183' type='submit' style='padding:10px 18px;'>Save &amp; Connect</button></div>";
+        html += "</form>";
+
+        html += "<div class='traffic-bar'><span id='cnt0183'></span><span>"
+                "<button type='button' id='pause0183' onclick='togglePause()'>Pause</button>"
+                "<button type='button' onclick='clearTraffic()'>Clear</button></span></div>";
+        html += "<pre id='traffic'></pre>";
+    }
+
+    html += "<p style='text-align:center; margin-top:14px;'><a href='/'>Back</a></p>";
+
+    html += "<script>"
+            // NMEA 2000 status, every 2 s
+            "function pollN2k(){"
+              "fetch('/n2k-stats').then(function(r){return r.json();}).then(function(d){"
+                "var el=document.getElementById('n2kstat');"
+                "if(d.src==='demo'){"
+                  "var ok=d.demo.indexOf('not running')<0;"
+                  "el.style.color=ok?'#4a4':'#c80';el.style.fontWeight=ok?'bold':'normal';"
+                  "el.textContent=d.demo;"
+                "}else if(d.pgns>0){"
+                  "el.style.color='#4a4';el.style.fontWeight='bold';"
+                  "el.textContent='Active' + (d.src==='wifi'?' via WiFi gateway':'') + ' (' + d.pgns + ' PGNs received)';"
+                "}else{"
+                  "el.style.color='#c80';el.style.fontWeight='normal';"
+                  "el.textContent=d.src==='wifi'?'No data yet':'No data (bus connected?)';"
+                "}"
+                "if(d.src==='wifi'){"
+                  "el.textContent+=' - ' + d.gw + (d.bad>0?' (' + d.bad + ' unreadable lines: check the format)':'');"
+                "}"
+              "}).catch(function(){});"
+              "setTimeout(pollN2k,2000);"
+            "}"
+            "pollN2k();"
+            "function n2kSrcChanged(){"
+              "var v=document.getElementById('n2ksrc').value;"
+              "document.getElementById('n2kgw').style.display=v==='wifi'?'block':'none';"
+              "document.getElementById('n2kdemo').style.display=v==='demo'?'block':'none';"
+              "document.getElementById('n2khostrow').style.display=document.getElementById('n2kproto').value==='tcp'?'':'none';"
+            "}"
+            "n2kSrcChanged();"
+            // NMEA 0183 status + traffic, every 1 s
+            "var seq0183=0,paused=false,MAXL=300;"
+            "var tr=document.getElementById('traffic');"
+            "function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;');}"
+            "function addLines(l){"
+              "if(!l.length)return;"
+              "var atEnd=tr.scrollTop+tr.clientHeight>=tr.scrollHeight-4;"
+              "var h='';"
+              "l.forEach(function(e){"
+                "var c=e[0]==2?'b':e[0]==3?'j':e[0]==4?'i':'';"
+                "var t=e[0]==4?'-- '+e[1]+' --':e[0]==2?e[1]+'   (bad checksum)':e[1];"
+                "h+='<div'+(c?' class=\"'+c+'\"':'')+'>'+esc(t)+'</div>';"
+              "});"
+              "tr.insertAdjacentHTML('beforeend',h);"
+              "while(tr.childNodes.length>MAXL)tr.removeChild(tr.firstChild);"
+              "if(atEnd)tr.scrollTop=tr.scrollHeight;"
+            "}"
+            "function poll0183(){"
+              "fetch('/nmea0183/log?since='+seq0183).then(function(r){return r.json();}).then(function(d){"
+                "var el=document.getElementById('st0183');"
+                "el.textContent=d.st;"
+                "var good=d.st.indexOf('Receiving on')===0||d.st.indexOf('Demonstration data:')===0;"
+                "el.style.color=good?'#4a4':d.st==='Off'?'#888':'#c80';"
+                "el.style.fontWeight=good?'bold':'normal';"
+                "document.getElementById('cnt0183').textContent=d.st==='Off'?'':"
+                  "d.n+' sentences, '+d.bad+' bad checksums, '+d.junk+' unreadable lines, '+d.bytes+' bytes';"
+                "if(d.seq<seq0183)seq0183=0;"
+                "if(!paused){addLines(d.l);seq0183=d.seq;}"
+              "}).catch(function(){});"
+              "setTimeout(poll0183,1000);"
+            "}"
+            "poll0183();"
+            "function port0183Changed(){"
+              "var v=document.getElementById('port0183').value;"
+              "document.getElementById('hw0183').style.display=v==='1'?'block':'none';"
+              "document.getElementById('demo0183').style.display=v==='2'?'block':'none';"
+            "}"
+            "port0183Changed();"
+            "function togglePause(){paused=!paused;document.getElementById('pause0183').textContent=paused?'Resume':'Pause';}"
+            "function clearTraffic(){tr.innerHTML='';}"
+            "function save0183(){"
+              "var b=document.getElementById('btn0183');b.disabled=true;b.textContent='Connecting...';"
+              "fetch('/save-0183',{method:'POST',body:new URLSearchParams(new FormData(document.getElementById('f0183')))})"
+                ".then(function(r){return r.json();}).then(function(d){"
+                  "b.textContent=d.ok?'Saved':'Not saved';"
+                "}).catch(function(){b.textContent='Not saved';})"
+                ".finally(function(){setTimeout(function(){b.disabled=false;b.textContent='Save & Connect';},1500);});"
+              "return false;"
+            "}"
+            "</script>";
+
+    html += "</div></div></body></html>";
+    config_server.send(200, "text/html", html);
+}
+
+// NMEA 2000 source is picked at start-up (CAN vs WiFi), so saving reboots.
+void handle_save_n2k() {
+    if (config_server.method() != HTTP_POST) {
+        config_server.send(405, "text/plain", "Method Not Allowed");
+        return;
+    }
+    N2kGwSettings gw;
+    String problem;
+    if (!read_n2k_source_args(gw, problem)) {
+        String html = "<html><head>";
+        html += STYLE;
+        html += "<title>Not saved</title></head><body><div class='container'>";
+        html += "<h2>Not saved</h2><p>" + problem + "</p><p><a href='/data'>Back</a></p></div></body></html>";
+        config_server.send(400, "text/html", html);
+        return;
+    }
+    n2k_gw_save(gw);
+    Serial.printf("[N2K] Saved: source=%s fmt=%u %s %s:%u\n", gw.demo ? "demo" : gw.use_wifi ? "wifi" : "can",
+                  gw.format, gw.udp ? "UDP" : "TCP", gw.host.c_str(), gw.port);
+    String html = "<html><head>";
+    html += STYLE;
+    html += "<title>Saved</title></head><body><div class='container'>";
+    html += "<h2>Settings saved.<br>Rebooting...</h2>";
+    html += "</div></body></html>";
+    config_server.send(200, "text/html", html);
+    delay(1000);
+    ESP.restart();
+}
+
+// NMEA 0183 applies straight away; the page posts this with fetch() so the
+// traffic window keeps running.
+void handle_save_0183() {
+    if (config_server.method() != HTTP_POST) {
+        config_server.send(405, "text/plain", "Method Not Allowed");
+        return;
+    }
+    Nmea0183Settings s;
+    long port = config_server.arg("port").toInt();
+    s.port = (port == NMEA0183_PORT_RS485 || port == NMEA0183_PORT_DEMO) ? (uint8_t)port : (uint8_t)NMEA0183_PORT_OFF;
+    s.auto_reconnect = config_server.hasArg("reconnect");
+    uint32_t baud = (uint32_t)config_server.arg("baud").toInt();
+    s.baud = nmea0183_valid_baud(baud) ? baud : 4800;
+    nmea0183_apply(s);
+    config_server.send(200, "application/json", "{\"ok\":true}");
+}
+
 void handle_save_wifi() {
     if (config_server.method() == HTTP_POST) {
-        // Check the NMEA 2000 data source first so nothing is saved if it's incomplete.
-        N2kGwSettings gw;
-        String problem;
-        bool has_src = config_server.hasArg("src");
-        if (has_src && !read_n2k_source_args(gw, problem)) {
-            String html = "<html><head>";
-            html += STYLE;
-            html += "<title>Not saved</title></head><body><div class='container'>";
-            html += "<h2>Not saved</h2><p>" + problem + "</p><p><a href='/network'>Back</a></p></div></body></html>";
-            config_server.send(400, "text/html", html);
-            return;
-        }
         saved_ssid = config_server.arg("ssid");
         saved_password = config_server.arg("password");
-        saved_signalk_ip = config_server.arg("signalk_ip");
-        saved_signalk_port = config_server.arg("signalk_port").toInt();
+        // Signal K isn't on the Network page: only change it if a form sends it,
+        // otherwise every WiFi save would blank the saved server.
+        if (config_server.hasArg("signalk_ip"))   saved_signalk_ip = config_server.arg("signalk_ip");
+        if (config_server.hasArg("signalk_port")) saved_signalk_port = config_server.arg("signalk_port").toInt();
         saved_hostname = config_server.arg("hostname");
         if (config_server.hasArg("wifi_wait")) {
             long w = config_server.arg("wifi_wait").toInt();
@@ -2808,11 +2980,6 @@ void handle_save_wifi() {
             wifi_wait_sec = (uint16_t)w;
         }
         save_preferences();
-        if (has_src) {
-            n2k_gw_save(gw);
-            Serial.printf("[N2K-WiFi] Saved: source=%s fmt=%u %s %s:%u\n", gw.use_wifi ? "wifi" : "can",
-                          gw.format, gw.udp ? "UDP" : "TCP", gw.host.c_str(), gw.port);
-        }
         Serial.println("[WiFi Config] SSID: " + saved_ssid);
         Serial.println("[WiFi Config] SignalK IP: " + saved_signalk_ip);
         Serial.printf("[WiFi Config] SignalK Port: %u\n", saved_signalk_port);
@@ -2992,6 +3159,7 @@ void handle_save_device() {
 
         // Own MMSI
         saved_own_mmsi = config_server.arg("own_mmsi");
+        g_own_mmsi = (uint32_t)saved_own_mmsi.toInt();
 
         // Persist settings
         save_preferences();
@@ -3220,9 +3388,19 @@ void setup_network() {
     config_server.on("/save-wifi", HTTP_POST, handle_save_wifi);
     config_server.on("/scan-wifi", HTTP_GET, handle_scan_wifi);
     config_server.on("/scan-wifi-results", HTTP_GET, handle_scan_wifi_results);
+    config_server.on("/data", handle_data_page);
+    config_server.on("/save-n2k", HTTP_POST, handle_save_n2k);
+    config_server.on("/save-0183", HTTP_POST, handle_save_0183);
+    config_server.on("/nmea0183/log", HTTP_GET, []() {
+        uint32_t since = config_server.hasArg("since") ? (uint32_t)strtoul(config_server.arg("since").c_str(), nullptr, 10) : 0;
+        config_server.sendHeader("Cache-Control", "no-store");
+        config_server.send(200, "application/json", nmea0183_log_json(since));
+    });
     config_server.on("/n2k-stats", HTTP_GET, []() {
         String json = "{\"pgns\":" + String(get_n2k_msg_count());
-        if (n2k_gw_enabled()) {
+        if (n2k_demo_selected()) {
+            json += ",\"src\":\"demo\",\"demo\":\"" + json_escape(nmea_demo_n2k_status()) + "\"";
+        } else if (n2k_gw_enabled()) {
             json += ",\"src\":\"wifi\",\"gw\":\"" + json_escape(n2k_gw_status()) + "\"";
             json += ",\"bad\":" + String(n2k_gw_bad_lines());
         } else {

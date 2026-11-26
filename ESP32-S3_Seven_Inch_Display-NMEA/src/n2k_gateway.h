@@ -12,6 +12,7 @@
 #include "n2k_gateway_decoder.h"
 
 struct N2kGwSettings {
+    bool demo = false;                  // true = Demonstration data (nmea_demo)
     bool use_wifi = false;              // false = CAN port (default)
     uint8_t format = N2KGW_FMT_YDRAW;   // N2kGwFormat
     bool udp = false;                   // false = TCP client, true = UDP listener
@@ -24,6 +25,7 @@ void n2k_gw_save(const N2kGwSettings& s);
 const N2kGwSettings& n2k_gw_settings();     // as loaded at boot
 
 bool n2k_gw_enabled();                      // WiFi gateway selected?
+bool n2k_demo_selected();                   // Demonstration data selected?
 void n2k_gw_start(N2kGwMsgHandler handler);
 void n2k_gw_stop();
 

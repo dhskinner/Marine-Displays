@@ -271,6 +271,18 @@ void set_sensor_value_by_path(const String& path, float value) {
     }
 }
 
+// Like set_sensor_value_by_path, but only the extended map: it doesn't scan
+// signalk_paths[], which refresh_signalk_subscriptions() rewrites on core 1.
+// Safe from the NMEA 2000 tasks on core 0.
+void set_extended_sensor_value(const String& path, float value) {
+    if (path.length() == 0) return;
+    if (sensor_mutex != NULL && xSemaphoreTake(sensor_mutex, pdMS_TO_TICKS(50))) {
+        sensor_rx_times[path] = millis();
+        extended_sensor_values[path] = value;
+        xSemaphoreGive(sensor_mutex);
+    }
+}
+
 void set_sensor_unit_by_path(const String& path, const String& unit) {
     if (path.length() == 0) return;
     if (sensor_mutex != NULL && xSemaphoreTake(sensor_mutex, pdMS_TO_TICKS(50))) {
@@ -359,4 +371,5 @@ void refresh_signalk_subscriptions() {
     for (int i = 0; i < TOTAL_PARAMS; i++) {
         signalk_paths[i] = get_signalk_path_by_index(i);
     }
+    n2k_refresh_slot_fields();   // gauge slots -> N2K fields for the receive tasks
 }

@@ -32,7 +32,6 @@ bool test_mode = false;
 #include "ais_display.h"
 #include "attitude_display.h"
 #include "anchor_display.h"
-#include "Gyro_QMI8658.h"
 #include "unit_convert.h"
 #include "version.h"
 #include "RTC_PCF85063.h"
@@ -1275,11 +1274,8 @@ void setup() {
         ets_printf("[HEAP] *** CORRUPTION detected AFTER setup_network ***\r\n");
     }
     
-    // Initialize QMI8658 IMU (accel + gyro) and load level calibration
-    QMI8658_Init();
+    // Attitude screen level offsets (pitch/roll come from NMEA 2000)
     attitude_load_calibration();
-    Serial.println("IMU initialized");
-    Serial.flush();
 
     // Start NMEA 2000 CAN bus listener
     Serial.println("Starting NMEA 2000...");

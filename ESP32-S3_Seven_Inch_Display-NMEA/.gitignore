@@ -1,6 +1,12 @@
 # PlatformIO
 .pio/
 .vscode/
+
+# Build artifacts
+*.bin
+*.elf
+*.map
+
 # Backup files
 *.bak
 *.old

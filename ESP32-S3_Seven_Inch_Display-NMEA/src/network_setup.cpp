@@ -315,6 +315,9 @@ static String label_attr(const String& in) {
 uint16_t auto_scroll_sec = 0;
 // Screen-off timeout in minutes (0 = always on)
 uint16_t screen_off_timeout_min = 0;
+// Rotate the display 180° (false = normal orientation)
+bool display_rotate_180 = false;
+volatile bool g_pending_rotation_apply = false;
 // Skip a single load of preferences when we've just saved, so the UI
 // reflects the in-memory `screen_configs` we just updated instead of
 // reloading possibly-stale NVS values.
@@ -529,6 +532,7 @@ void save_preferences(bool skip_screen_blobs = false) {
         preferences.putUShort("auto_scroll", auto_scroll_sec);
         preferences.putUShort("unit_system", (uint16_t)unit_system);
         preferences.putUShort("screen_off_tmout", screen_off_timeout_min);
+        preferences.putBool("rotate_180", display_rotate_180);
         for (int i = 0; i < NUM_SCREENS * 2; ++i) {
             String key = String("skpath_") + i;
             preferences.putString(key.c_str(), signalk_paths[i]);
@@ -636,6 +640,7 @@ void save_preferences(bool skip_screen_blobs = false) {
                     preferences.putUShort("auto_scroll", auto_scroll_sec);
                     preferences.putUShort("unit_system", (uint16_t)unit_system);
                     preferences.putUShort("screen_off_tmout", screen_off_timeout_min);
+                    preferences.putBool("rotate_180", display_rotate_180);
                     for (int i = 0; i < NUM_SCREENS * 2; ++i) {
                         String key = String("skpath_") + i;
                         preferences.putString(key.c_str(), signalk_paths[i]);
@@ -732,6 +737,7 @@ void load_preferences() {
         auto_scroll_sec = preferences.getUShort("auto_scroll", 0);
         unit_system = (UnitSystem)preferences.getUShort("unit_system", (uint16_t)UNIT_NAUTICAL_METRIC);
         screen_off_timeout_min = preferences.getUShort("screen_off_tmout", 0);
+        display_rotate_180 = preferences.getBool("rotate_180", false);
         // Load device settings
         buzzer_mode = (int)preferences.getUShort("buzzer_mode", (uint16_t)buzzer_mode);
         buzzer_cooldown_sec = preferences.getUShort("buzzer_cooldown", buzzer_cooldown_sec);
@@ -2865,6 +2871,9 @@ void handle_device_page() {
     html += "<option value='10'" + String(screen_off_timeout_min==10?" selected":"") + ">10 min</option>";
     html += "<option value='30'" + String(screen_off_timeout_min==30?" selected":"") + ">30 min</option>";
     html += "</select></div>";
+    // Rotate 180° (for a display mounted upside down)
+    html += "<div class='form-row'><label>Rotate 180&deg;:</label><input name='rotate_180' type='checkbox' value='1'"
+            + String(display_rotate_180 ? " checked" : "") + "></div>";
     // Brightness — V4: unified slider (10-200, with red mode below 110), V3: 4-step slider
     if (is_board_v4()) {
         html += "<div class='form-row'><label>Brightness:</label>";
@@ -2954,6 +2963,15 @@ void handle_save_device() {
         // Only accept the allowed values; anything else → always on
         if (sot != 1 && sot != 5 && sot != 10 && sot != 30) sot = 0;
         screen_off_timeout_min = sot;
+
+        // Rotate 180°: an unchecked checkbox isn't posted at all, so absence = off.
+        // The rotation itself is applied by loop(), not here (LVGL isn't safe
+        // to touch from an HTTP handler).
+        bool rot = config_server.hasArg("rotate_180");
+        if (rot != display_rotate_180) {
+            display_rotate_180 = rot;
+            g_pending_rotation_apply = true;
+        }
 
         // Brightness level
         uint8_t bl = (uint8_t)config_server.arg("brightness_lv").toInt();

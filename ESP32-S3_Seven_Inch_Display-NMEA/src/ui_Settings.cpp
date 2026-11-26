@@ -38,6 +38,7 @@ lv_obj_t *ui_BuzzerCooldownDrop = NULL;
 lv_obj_t *ui_BuzzerCooldownLabel = NULL;
 static lv_obj_t *ui_ScreenOffDrop = NULL;
 static lv_obj_t *ui_ScreenOffLabel = NULL;
+static lv_obj_t *ui_RotateSwitch = NULL;
 
 // Timer to periodically sync settings with values (in case web page changes them)
 static lv_timer_t *settings_refresh_timer = NULL;
@@ -250,7 +251,11 @@ extern "C" void update_settings_values(void)
         lv_dropdown_set_selected(ui_ScreenOffDrop, sel);
     }
 
-
+    // Update rotate switch
+    if (ui_RotateSwitch != NULL) {
+        if (display_rotate_180) lv_obj_add_state(ui_RotateSwitch, LV_STATE_CHECKED);
+        else lv_obj_clear_state(ui_RotateSwitch, LV_STATE_CHECKED);
+    }
 }
 
 // Event handler for back button (swipe up)
@@ -582,7 +587,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_label_set_text(ui_BuzzerLabel, "Buzzer:");
     lv_obj_set_style_text_color(ui_BuzzerLabel, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_x(ui_BuzzerLabel, -155);
-    lv_obj_set_y(ui_BuzzerLabel, -40);
+    lv_obj_set_y(ui_BuzzerLabel, -55);
     lv_obj_set_align(ui_BuzzerLabel, LV_ALIGN_CENTER);
 
     // Buzzer mode dropdown (Off / Global / Per-screen)
@@ -591,7 +596,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_width(ui_BuzzerSwitch, 120);
     lv_obj_set_height(ui_BuzzerSwitch, 32);
     lv_obj_set_x(ui_BuzzerSwitch, -55);
-    lv_obj_set_y(ui_BuzzerSwitch, -40);
+    lv_obj_set_y(ui_BuzzerSwitch, -55);
     lv_obj_set_align(ui_BuzzerSwitch, LV_ALIGN_CENTER);
     lv_obj_add_event_cb(ui_BuzzerSwitch, buzzer_switch_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
@@ -612,7 +617,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_width(ui_BuzzerCooldownDrop, 110);
     lv_obj_set_height(ui_BuzzerCooldownDrop, 32);
     lv_obj_set_x(ui_BuzzerCooldownDrop, 80);
-    lv_obj_set_y(ui_BuzzerCooldownDrop, -40);
+    lv_obj_set_y(ui_BuzzerCooldownDrop, -55);
     lv_obj_set_align(ui_BuzzerCooldownDrop, LV_ALIGN_CENTER);
 
     // Map persisted seconds to dropdown index
@@ -667,7 +672,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_style_text_color(ui_APCredsLabel, lv_color_hex(0xFFAA00), 0);
     lv_obj_set_style_text_font(ui_APCredsLabel, &lv_font_montserrat_14, 0);
     lv_obj_set_x(ui_APCredsLabel, 0);
-    lv_obj_set_y(ui_APCredsLabel, -100);
+    lv_obj_set_y(ui_APCredsLabel, -105);
     lv_obj_set_align(ui_APCredsLabel, LV_ALIGN_CENTER);
     lv_label_set_long_mode(ui_APCredsLabel, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(ui_APCredsLabel, 260);
@@ -678,7 +683,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_label_set_text(ui_RSSITitle, "WiFi Signal:");
     lv_obj_set_style_text_color(ui_RSSITitle, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_x(ui_RSSITitle, -110);
-    lv_obj_set_y(ui_RSSITitle, -100);
+    lv_obj_set_y(ui_RSSITitle, -105);
     lv_obj_set_align(ui_RSSITitle, LV_ALIGN_CENTER);
     
     // RSSI bar
@@ -686,7 +691,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_width(ui_RSSIBar, 120);
     lv_obj_set_height(ui_RSSIBar, 14);
     lv_obj_set_x(ui_RSSIBar, 20);
-    lv_obj_set_y(ui_RSSIBar, -100);
+    lv_obj_set_y(ui_RSSIBar, -105);
     lv_obj_set_align(ui_RSSIBar, LV_ALIGN_CENTER);
     lv_bar_set_range(ui_RSSIBar, 0, 100);
     lv_bar_set_value(ui_RSSIBar, 0, LV_ANIM_OFF);
@@ -701,7 +706,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_label_set_text(ui_RSSILabel, "--");
     lv_obj_set_style_text_color(ui_RSSILabel, lv_color_hex(0x808080), 0);
     lv_obj_set_x(ui_RSSILabel, 150);
-    lv_obj_set_y(ui_RSSILabel, -100);
+    lv_obj_set_y(ui_RSSILabel, -105);
     lv_obj_set_align(ui_RSSILabel, LV_ALIGN_CENTER);
     
     // Auto-scroll dropdown
@@ -709,7 +714,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_label_set_text(ui_AutoScrollLabel, "Auto-scroll:");
     lv_obj_set_style_text_color(ui_AutoScrollLabel, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_x(ui_AutoScrollLabel, -80);
-    lv_obj_set_y(ui_AutoScrollLabel, 20);
+    lv_obj_set_y(ui_AutoScrollLabel, -5);
     lv_obj_set_align(ui_AutoScrollLabel, LV_ALIGN_CENTER);
 
     ui_AutoScrollDrop = lv_dropdown_create(ui_SettingsPanel);
@@ -717,7 +722,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_width(ui_AutoScrollDrop, 140);
     lv_obj_set_height(ui_AutoScrollDrop, 32);
     lv_obj_set_x(ui_AutoScrollDrop, 40);
-    lv_obj_set_y(ui_AutoScrollDrop, 20);
+    lv_obj_set_y(ui_AutoScrollDrop, -5);
     lv_obj_set_align(ui_AutoScrollDrop, LV_ALIGN_CENTER);
 
     // Set current selection from persisted value
@@ -754,7 +759,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_label_set_text(ui_ScreenOffLabel, "Screen Sleep:");
     lv_obj_set_style_text_color(ui_ScreenOffLabel, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_x(ui_ScreenOffLabel, -100);
-    lv_obj_set_y(ui_ScreenOffLabel, 80);
+    lv_obj_set_y(ui_ScreenOffLabel, 45);
     lv_obj_set_align(ui_ScreenOffLabel, LV_ALIGN_CENTER);
 
     ui_ScreenOffDrop = lv_dropdown_create(ui_SettingsPanel);
@@ -762,7 +767,7 @@ extern "C" void ui_Settings_screen_init(void)
     lv_obj_set_width(ui_ScreenOffDrop, 140);
     lv_obj_set_height(ui_ScreenOffDrop, 32);
     lv_obj_set_x(ui_ScreenOffDrop, 40);
-    lv_obj_set_y(ui_ScreenOffDrop, 80);
+    lv_obj_set_y(ui_ScreenOffDrop, 45);
     lv_obj_set_align(ui_ScreenOffDrop, LV_ALIGN_CENTER);
 
     // Set current selection from persisted value
@@ -794,6 +799,38 @@ extern "C" void ui_Settings_screen_init(void)
         // Reset activity timer so the new timeout starts from now
         extern uint32_t g_last_activity_ms;
         g_last_activity_ms = millis();
+    }, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // Rotate 180° switch (same setting as the web Device Settings page)
+    lv_obj_t *rotate_label = lv_label_create(ui_SettingsPanel);
+    lv_label_set_text(rotate_label, "Rotate 180\xC2\xB0:");
+    lv_obj_set_style_text_color(rotate_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_x(rotate_label, -100);
+    lv_obj_set_y(rotate_label, 95);
+    lv_obj_set_align(rotate_label, LV_ALIGN_CENTER);
+
+    ui_RotateSwitch = lv_switch_create(ui_SettingsPanel);
+    lv_obj_set_width(ui_RotateSwitch, 60);
+    lv_obj_set_height(ui_RotateSwitch, 30);
+    lv_obj_set_x(ui_RotateSwitch, 0);
+    lv_obj_set_y(ui_RotateSwitch, 95);
+    lv_obj_set_align(ui_RotateSwitch, LV_ALIGN_CENTER);
+    if (display_rotate_180) lv_obj_add_state(ui_RotateSwitch, LV_STATE_CHECKED);
+
+    // Event handler: persist, then let loop() apply the rotation. Rotating
+    // from inside this callback would change the display while LVGL is still
+    // processing the touch that toggled the switch.
+    lv_obj_add_event_cb(ui_RotateSwitch, [](lv_event_t *e){
+        lv_obj_t *sw = lv_event_get_target(e);
+        bool on = lv_obj_has_state(sw, LV_STATE_CHECKED);
+        if (on == display_rotate_180) return;
+        display_rotate_180 = on;
+        Preferences p;
+        if (p.begin("settings", false)) {
+            p.putBool("rotate_180", on);
+            p.end();
+        }
+        g_pending_rotation_apply = true;
     }, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Brightness control — V4: PWM slider (0-100%), V3: 4-step overlay dropdown

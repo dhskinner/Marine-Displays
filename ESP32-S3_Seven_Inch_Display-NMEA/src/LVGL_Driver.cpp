@@ -17,6 +17,8 @@
 // Screen-off state — defined in main.cpp
 extern bool     g_screen_is_off;
 extern uint32_t g_last_activity_ms;
+// Device setting — defined in network_setup.cpp, loaded before Lvgl_Init()
+extern bool display_rotate_180;
 
 // Diagnostic: set to 1 to force byte-swapped (big-endian) drawing path
 #define FORCE_BE_DRAW 0
@@ -343,9 +345,14 @@ void Lvgl_Init(void)
   // Use smaller buffers for incremental rendering
   disp_drv.draw_buf = &draw_buf;
   disp_drv.user_data = panel_handle;
-  // The 7" panel is mounted upright (the 4" board's panel needed 180°).
-  disp_drv.sw_rotate = 0;
-  disp_drv.rotated = LV_DISP_ROT_NONE;
+  // The 7" panel is mounted upright; "Rotate 180°" on the Device Settings page
+  // flips it for upside-down mounting. LVGL rotates each draw buffer in place
+  // before the flush, and flips touch points to match, so the flush and touch
+  // code here stay in UI coordinates. The UI is centred on the panel, so a
+  // 180° turn of the 480x480 area is a 180° turn of the whole panel.
+  // load_preferences() has run by now (see setup() in main.cpp).
+  disp_drv.sw_rotate = 1;
+  disp_drv.rotated = display_rotate_180 ? LV_DISP_ROT_180 : LV_DISP_ROT_NONE;
   disp_drv.direct_mode = 0;         // Disable direct mode
   disp_drv.full_refresh = 0;        // Partial refresh
   
@@ -400,6 +407,15 @@ void Lvgl_Init(void)
     g_flush_max_us = 0;
     g_flush_count = 0;
   }
+void Lvgl_SetRotate180(bool on)
+{
+  lv_disp_rot_t rot = on ? LV_DISP_ROT_180 : LV_DISP_ROT_NONE;
+  if (lv_disp_get_rotation(NULL) == rot) return;
+  // Invalidates the whole screen, so the next refresh redraws it the new way up.
+  lv_disp_set_rotation(NULL, rot);
+  Serial.printf("[LVGL] display rotation -> %s\n", on ? "180" : "0");
+}
+
 void Lvgl_Loop(void)
 {
   lv_timer_handler(); /* let the GUI do its work */

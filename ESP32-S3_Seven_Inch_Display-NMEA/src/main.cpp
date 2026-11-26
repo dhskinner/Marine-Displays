@@ -1734,6 +1734,12 @@ void loop() {
         // stops accessing the config page.
     }
 
+    // Deferred display rotation from the Device Settings page.
+    if (g_pending_rotation_apply) {
+        g_pending_rotation_apply = false;
+        Lvgl_SetRotate180(display_rotate_180);
+    }
+
     Lvgl_Loop();
     if (g_full_brightness_request) {
         g_full_brightness_request = false;

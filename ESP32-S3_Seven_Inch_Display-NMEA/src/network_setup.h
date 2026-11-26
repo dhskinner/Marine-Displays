@@ -18,6 +18,11 @@ extern WebServer config_server;
 extern uint16_t auto_scroll_sec;
 // Screen-off timeout in minutes (0 = always on)
 extern uint16_t screen_off_timeout_min;
+// Show the UI rotated 180° (display mounted upside down). Saved in NVS.
+extern bool display_rotate_180;
+// Set by the Device Settings save handler; loop() applies the new rotation to
+// LVGL (LVGL must not be touched from an HTTP handler).
+extern volatile bool g_pending_rotation_apply;
 
 // Request the UI to change auto-scroll interval at runtime
 void set_auto_scroll_interval(uint16_t sec);

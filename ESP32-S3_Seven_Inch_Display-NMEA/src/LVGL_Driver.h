@@ -26,6 +26,8 @@ void reset_flush_stats();
 
 void Lvgl_Init(void);
 void Lvgl_Loop(void);
+// Rotate the UI 180° (or back). Call only from the LVGL (loop) task.
+void Lvgl_SetRotate180(bool on);
 
 // Pixel remapping utilities (for diagnosing color wiring)
 // Toggle remapping on/off. When enabled, LVGL pixel data will be bit-permuted

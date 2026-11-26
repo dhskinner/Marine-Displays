@@ -44,7 +44,7 @@
 // (IDF 4.4) the DMA reads the frame buffer straight from PSRAM, and 16 MHz
 // (32 MB/s) underruns: the picture flickers and tears. 12 MHz -> (800+20) x
 // (480+20) = ~29 Hz refresh.
-#define ESP_PANEL_LCD_RGB_TIMING_FREQ_HZ          (12 * 1000 * 1000)
+#define ESP_PANEL_LCD_RGB_TIMING_FREQ_HZ          (12 * 1000 * 1000)   // 10 MHz is too slow: the panel drops to its self-test colours
 #define ESP_PANEL_LCD_RGB_TIMING_HPW              (4)
 #define ESP_PANEL_LCD_RGB_TIMING_HBP              (8)
 #define ESP_PANEL_LCD_RGB_TIMING_HFP              (8)

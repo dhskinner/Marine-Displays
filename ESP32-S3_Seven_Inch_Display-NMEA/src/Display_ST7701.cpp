@@ -4,6 +4,7 @@
 #include "TCA9554PWR.h"
 #include <Arduino.h>
 #include "esp_timer.h"
+#include "esp_rom_sys.h"   // esp_rom_delay_us
 
 esp_lcd_panel_handle_t panel_handle = NULL;
 
@@ -158,9 +159,23 @@ void LCD_addWindow(uint16_t Xstart, uint16_t Ystart, uint16_t Xend, uint16_t Yen
   if (x1 > ESP_PANEL_LCD_WIDTH)  x1 = ESP_PANEL_LCD_WIDTH;
   if (y1 > ESP_PANEL_LCD_HEIGHT) y1 = ESP_PANEL_LCD_HEIGHT;
   if (x0 >= x1 || y0 >= y1) return;
-  esp_lcd_panel_draw_bitmap(panel_handle,
-                            x0 + UI_X_OFFSET, y0 + UI_Y_OFFSET,
-                            x1 + UI_X_OFFSET, y1 + UI_Y_OFFSET, color);
+  // Copy in short bands with a brief pause between them. The panel's DMA
+  // streams the frame buffer from PSRAM continuously; draw_bitmap copies the
+  // area and then writes the cache back for all those rows in one burst, and
+  // a long burst (a full-width band of values is ~30 rows) can hold the bus
+  // long enough for the DMA to run dry. That showed as the background
+  // flickering on solid-colour screens whenever values changed. Short bands
+  // keep each burst small, and the pause (no PSRAM access) lets it catch up.
+  const int BAND_ROWS = 8;
+  const size_t row_bytes = (size_t)(x1 - x0) * 2;   // RGB565
+  for (int y = y0; y < y1; y += BAND_ROWS) {
+    int y_end = y + BAND_ROWS < y1 ? y + BAND_ROWS : y1;
+    esp_lcd_panel_draw_bitmap(panel_handle,
+                              x0 + UI_X_OFFSET, y + UI_Y_OFFSET,
+                              x1 + UI_X_OFFSET, y_end + UI_Y_OFFSET,
+                              color + (size_t)(y - y0) * row_bytes);
+    if (y_end < y1) esp_rom_delay_us(20);
+  }
 }
 
 // ── Backlight (on/off only on this board) ───────────────────────────────────
